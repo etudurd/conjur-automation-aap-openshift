@@ -1,0 +1,6 @@
+add as extra vars in template   plus prompt at execution 
+
+namespace: ""
+deployment_name: ""
+ocp_api_host: ""
+ocp_token: ""
