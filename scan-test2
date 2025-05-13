@@ -1,0 +1,87 @@
+- name: Scan app for Kubernetes Secret usage and suggest improvements
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Get deployment spec
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        api_version: apps/v1        
+        name: "{{ deployment_name }}"
+        namespace: "{{ k8s_namespace }}"
+        host: "https://{{ ocp_api_host }}"
+        api_key: "{{ ocp_token }}"
+        verify_ssl: false
+      register: dep_info
+
+    - name: Debug deployment structure (optional)
+      debug:
+        var: dep_info.resources[0].spec.template.spec
+
+    - name: Extract referenced secrets from deployment
+      set_fact:
+        used_secrets: >-
+          {{
+            (
+              dep_info.resources[0].spec.template.spec.containers
+              | map('default', {}) | select('defined') | list
+              | map(attribute='env') | map('default', []) | list | sum(start=[])
+              | map(attribute='valueFrom') | select('defined')
+              | map(attribute='secretKeyRef') | select('defined')
+              | map(attribute='name')
+            )
+            +
+            (
+              dep_info.resources[0].spec.template.spec.volumes
+              | default([]) | selectattr('secret.secretName', 'defined')
+              | map(attribute='secret.secretName')
+            )
+          | list | unique
+          }}
+
+    - name: Get all secrets in namespace
+      kubernetes.core.k8s_info:
+        kind: Secret
+        api_version: v1
+        namespace: "{{ k8s_namespace }}"
+        host: "https://{{ ocp_api_host }}"
+        api_key: "{{ ocp_token }}"
+        verify_ssl: false
+      register: all_secrets
+
+    - name: Show used vs available secrets
+      debug:
+        msg: |
+          🔐 Deployment "{{ deployment_name }}" is using these Kubernetes secrets:
+          {% for s in used_secrets %}
+          - {{ s }}
+          {% endfor %}
+
+          📦 Available Secrets in namespace "{{ k8s_namespace }}":
+          {% for s in all_secrets.resources %}
+          - {{ s.metadata.name }} (type: {{ s.type }})
+          {% endfor %}
+
+    - name: Show contents of used secrets (keys only, no values)
+      vars:
+        matched_secrets: >-
+          {{
+            all_secrets.resources
+            | selectattr('metadata.name', 'in', used_secrets)
+            | list
+          }}
+      debug:
+        msg: |
+          🔍 Secret content breakdown for used secrets:
+          {% for s in matched_secrets %}
+          - Secret: {{ s.metadata.name }}
+            Keys: {% for k in s.data.keys() %}{{ k }} {% endfor %}
+          {% endfor %}
+
+    - name: Suggest improvements
+      debug:
+        msg: |
+          💡 Recommendations:
+          {% for s in used_secrets %}
+          - Secret '{{ s }}' might be a candidate for CyberArk Conjur integration.
+            Consider replacing static secret with dynamic retrieval using the Secrets Provider sidecar or init container.
+          {% endfor %}
