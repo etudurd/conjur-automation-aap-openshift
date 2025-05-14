@@ -2,9 +2,8 @@
   id: secrets
   body:
     - !group consumers
-{% if secret_keys | length > 0 %}
     - &variables
-{% for key in secret_keys %}
+{% for key in conjur_prefixed_secret_keys %}
       - !variable
         id: {{ key }}
         annotations:
@@ -14,7 +13,7 @@
       role: !group consumers
       privilege: [ read, execute ]
       resource: *variables
-{% endif %}
+
 - !grant
   role: !group secrets/consumers
   member: !host app-path/system:serviceaccount:{{ k8s_namespace }}:{{ service_account }}
